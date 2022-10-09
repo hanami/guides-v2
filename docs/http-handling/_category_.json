@@ -1,0 +1,8 @@
+{
+  "label": "HTTP handling",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "description": "Routing, actions and middlewares."
+  }
+}

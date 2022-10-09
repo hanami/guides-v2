@@ -68,9 +68,9 @@ const config = {
             type: 'doc',
             docId: 'intro',
             position: 'left',
-            label: 'Tutorial',
+            label: 'Guides',
           },
-          {to: '/blog', label: 'Blog', position: 'left'},
+          {to: '/blog', label: 'Reference', position: 'left'},
           {
             href: 'https://github.com/hanami/hanami',
             label: 'GitHub',
@@ -85,7 +85,7 @@ const config = {
             title: 'Docs',
             items: [
               {
-                label: 'Tutorial',
+                label: 'Guides',
                 to: '/docs/intro',
               },
             ],

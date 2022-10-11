@@ -8,11 +8,11 @@ In Hanami, the application code you add to your `/app` directory is automaticall
 
 Let's take a look at what this means in practice.
 
-Imagine we're building a Bookshelf notifications service responsible for sending notifications to users of the Bookshelf platform, over email and instant message. After running `hanami new notifications_service`, our first task is to send welcome emails. To achieve this, we want to provide a `POST /welcome-emails` action that will send a welcome email via a third-party Acme Email service.
+Imagine we're building a Bookshelf notifications service for sending notifications to users of the Bookshelf platform. After running `hanami new notifications_service`, our first task is to send welcome emails. To achieve this, we want to provide a `POST /welcome-emails` action that will send a welcome email, probably via a send welcome operation, which in turn will want to render our email in both html and plain text.
 
-As a first pass, we might add two components to our `/app` folder: an action to handle the POST requests, and a send operation for welcome emails.
+As a first pass, we might add four Ruby classes to our `/app` folder - our action, operation, and two renderers.
 
-Ignoring the content of these classes for now, on the file system, this might look like:
+On the file system, this might look like:
 
 ```shell
 app
@@ -21,13 +21,16 @@ app
 │       └── create.rb
 └── emails
     └── welcome
-        └── operations
-            └── send.rb
+        ├── operations
+        │   └── send.rb
+        └── renderers
+            ├── html.rb
+            └── text.rb
 ```
 
-When our application boots, Hanami will automatically create instances of these two components and register them in its __app container__, under a key based on their Ruby namespace.
+When our application boots, Hanami will automatically create instances of these components and register them in its __app container__, under a key based on their Ruby namespace.
 
-For example, an instance of our `NotificationsService::Emails::Welcome::Operations::Send` class will be registered under the key `"emails.welcome.operations.send"` (since every class in the `/app` folder uses `module NotificationsService` as its top level namespace, that module is excluded from the container key).
+For example, an instance of our `NotificationsService::Emails::Welcome::Operations::Send` class will be registered under the key `"emails.welcome.operations.send"`.
 
 ```ruby title="app/emails/welcome/operations/send.rb"
 # frozen_string_literal: true
@@ -63,7 +66,9 @@ notifications_service[development]> Hanami.app.keys
  "logger",
  "rack.monitor",
  "actions.welcome_emails.create",
- "emails.welcome.operations.send"]
+ "emails.welcome.operations.send",
+ "emails.welcome.renderers.html",
+ "emails.welcome.renderers.text"]
  ```
 
 To fetch our welcome email send operation from the container, we ask for it by its `"emails.welcome.operations.send"` key:
@@ -74,10 +79,9 @@ notifications_service[development]> Hanami.app["emails.welcome.operations.send"]
 
 notifications_service[development]> Hanami.app["emails.welcome.operations.send"].call(name: "New user", email_address: "email@example.com")
 Sending greetings to New user email@example.com!
-=> nil
 ```
 
-Most of the time however, you won't use the container directly via `Hanami.app`, but will instead make use of the container through the dependency injection system it supports.
+Most of the time however, you won't use the container directly via `Hanami.app`, but will instead make use of the container through the dependency injection system it supports. Let's see how that works!
 
 ## Dependency injection
 
@@ -87,6 +91,8 @@ To illustrate, here's an example of a welcome email send operation which _doesn'
 
 ```ruby title="app/emails/welcome/operations/send.rb"
 # frozen_string_literal: true
+
+require "acme_email/client"
 
 module NotificationsService
   module Emails
@@ -99,10 +105,9 @@ module NotificationsService
             AcmeEmail::Client.new.deliver(
               to: email_address,
               subject: "Welcome!",
-              text_body: "Welcome to Bookshelf #{name}"
+              text_body: Renderers::Text.new.call(name: name),
+              html_body: Renderers::Html.new.call(name: name)
             )
-
-            Hanami::Logger.new.info("Welcome email to #{email_address} queued for delivery")
           end
         end
       end
@@ -111,13 +116,14 @@ module NotificationsService
 end
 ```
 
-This component has three dependencies, each of which is a "hard coded" reference to a concrete Ruby class:
+This component has four dependencies, each of which is a "hard coded" reference to a concrete Ruby class:
 
 - `Hanami::Settings`, used to check whether email sending is enabled in the current environment.
-- `AcmeEmail::Client`, used to queue the email for delivery via Acme's email service.
-- `Hanami::Logger`, used to log a message that the email has been queued.
+- `AcmeEmail::Client`, used to queue the email for delivery via the third party Acme Email service.
+- `Renderers::Text`, used to render the text version of the welcome email.
+- `Renderers::Html`, used to render the html version of the welcome email.
 
-To make our send welcome email operation more resuable and easier to test, we could instead _inject_ its three dependencies when we initialize it:
+To make our send welcome email operation more resuable and easier to test, we could instead _inject_ its dependencies when we initialize it:
 
 ```ruby title="app/emails/welcome/operations/send.rb"
 # frozen_string_literal: true
@@ -129,12 +135,14 @@ module NotificationsService
         class Send
           attr_reader :email_client
           attr_reader :settings
-          attr_reader :logger
+          attr_reader :text
+          attr_reader :html
 
-          def initialize(email_client:, settings:, logger:)
+          def initialize(email_client:, settings:, text:, html:)
             @email_client = email_client
             @settings = settings
-            @logger = logger
+            @text = text
+            @html = html
           end
 
           def call(name:, email_address:)
@@ -143,10 +151,9 @@ module NotificationsService
             email_client.deliver(
               to: email_address,
               subject: "Welcome!",
-              text_body: "Welcome to Bookshelf #{name}"
+              text_body: text.call(name: name)
+              html_body: html.call(name: name)
             )
-
-            logger.info("Welcome email to #{email_address} queued for delivery")
           end
         end
       end
@@ -155,9 +162,9 @@ module NotificationsService
 end
 ```
 
-As a result of injection, our component no longer has rigid dependencies - it's able to use any email client, settings object or logger we provide to it.
+As a result of injection, our component no longer has rigid dependencies - it's able to use any email client, settings object or renderers we provide.
 
-Hanami makes this style of dependency injection simple through an `include Deps[]` mechanism. Built into the app container (and all slice containers), `include Deps[]` allows components to use any component in their container as a dependency, while removing the need for any attr_reader or initializer boilerplate:
+Hanami makes this style of dependency injection simple through an `include Deps[]` mechanism. Built into the app container (and all slice containers), `include Deps[]` allows a component to use any other component in its container as a dependency, while removing the need for any attr_reader or initializer boilerplate:
 
 ```ruby title="app/emails/welcome/operations/send.rb"
 # frozen_string_literal: true
@@ -167,7 +174,12 @@ module NotificationsService
     module Welcome
       module Operations
         class Send
-          include Deps["email_client", "logger", "settings"]
+          include Deps[
+            "settings",
+            "email_client",
+            "emails.welcome.renderers.text",
+            "emails.welcome.renderers.html"
+          ]
 
           def call(name:, email_address:)
             return unless settings.email_sending_enabled
@@ -175,10 +187,9 @@ module NotificationsService
             email_client.deliver(
               to: email_address,
               subject: "Welcome!",
-              text_body: "Welcome to Bookshelf #{name}"
+              text_body: text.call(name: name),
+              html_body: html.call(name: name)
             )
-
-            logger.info("Welcome email to #{email_address} queued for delivery")
           end
         end
       end
@@ -189,47 +200,52 @@ end
 
 ## Injecting dependencies via `include Deps[]`
 
-In the above example the `include Deps[]` mechanism takes each given key and makes the relevant component from the app container available via an instance method of the same name. i.e. `include Deps["logger"]` makes the `logger` registration from the app container available anywhere in the class via the `#logger` method. (`logger` is automatically provided by Hanami).
+In the above example the `include Deps[]` mechanism takes each given key and makes the relevant component from the app container available via an instance method of the same name. i.e. `include Deps["settings"]` makes the `settings` registration from the app container available anywhere in the class via the `#settings` method. By default, dependencies are made available under a method named after the last segment of their key. So `include Deps["emails.welcome.renderers.html"]` makes the html renderer available via the method `#html`.
 
 We can see `include Deps[]` in action in the console if we instantiate an instance of our send welcome email operation:
 
 ```ruby
 notifications_service[development]> NotificationsService::Emails::Welcome::Operations::Send.new
-=> #<NotificationsService::Emails::Welcome::Operations::Send:0x000000010e7b2460
- @email_client=#<AcmeEmail::Client:0x000000010e7c01f0>,
- @logger=
-  #<Hanami::Logger:0x000000010e7b82c0
-   @application_name="notifications_service",
-  ...snip...
+=> #<NotificationsService::Emails::Welcome::Operations::Send:0x000000010c843660
+ @email_client=#<AcmeEmail::Client:0x000000010c808858>,
+ @html=#<NotificationsService::Emails::Welcome::Renderers::Html:0x000000010c843818>,
  @settings=
-  #<NotificationsService::Settings:0x000000010b7efe58
-   @config=#<Dry::Configurable::Config values={:email_sending_enabled=>true}>>>
+  #<NotificationsService::Settings:0x000000010c4bf340
+   @config=#<Dry::Configurable::Config values={:email_sending_enabled=>true}>>,
+ @text=#<NotificationsService::Emails::Welcome::Renderers::Text:0x000000010c858628>>
 ```
 
 We can provide different dependencies during initialization:
 
 ```ruby
-notifications_service[development]> NotificationsService::Emails::Welcome::Operations::Send.new(logger: "a different logger")
-=> #<NotificationsService::Emails::Welcome::Operations::Send:0x000000010bc207c0
- @email_client=#<AcmeEmail::Client:0x000000010ba91f30>,
- @logger="a different logger",
+notifications_service[development]> NotificationsService::Emails::Welcome::Operations::Send.new(email_client: "another client")
+=> #<NotificationsService::Emails::Welcome::Operations::Send:0x000000010c1ded88
+ @email_client="another client",
+ @html=#<NotificationsService::Emails::Welcome::Renderers::Html:0x000000010c1df1c0>,
  @settings=
-  #<NotificationsService::Settings:0x000000010b7efe58
-   @config=#<Dry::Configurable::Config values={:email_sending_enabled=>true}>>>
+  #<NotificationsService::Settings:0x000000010c4bf340
+   @config=#<Dry::Configurable::Config values={:email_sending_enabled=>true, :acme_api_key=>"sdf"}>>,
+ @text=#<NotificationsService::Emails::Welcome::Renderers::Text:0x000000010c28ca50>>
 ```
 
 This behaviour is particularly useful when testing, as you can substitute one or more components to test behaviour.
 
-In this unit test, we substitute all three dependencies in order to unit test our operations behaviour:
+In this unit test, we substitute each of the operation's dependencies in order to unit test its behaviour:
 
 ```ruby title="spec/unit/emails/welcome/operations/send_spec.rb"
 RSpec.describe NotificationsService::Emails::Welcome::Operations::Send, "#call" do
   subject(:send) {
-    described_class.new(email_client: email_client, settings: settings, logger: logger)
+    described_class.new(
+      email_client: email_client,
+      settings: settings,
+      text: text,
+      html: html
+    )
   }
 
   let(:email_client) { double(:email_client) }
-  let(:logger) { double(:logger) }
+  let(:text) { double(:text, call: "Welcome to Bookshelf Bookshelf user") }
+  let(:html) { double(:html, call: "<p>Welcome to Bookshelf Bookshelf user</p>") }
 
   context "when email sending is enabled" do
     let(:settings) { double(:settings, email_sending_enabled: true) }
@@ -238,11 +254,8 @@ RSpec.describe NotificationsService::Emails::Welcome::Operations::Send, "#call" 
       expect(email_client).to receive(:deliver).with(
         to: "email@example.com",
         subject: "Welcome!",
-        text_body: "Welcome to Bookshelf Bookshelf user"
-      )
-
-      expect(logger).to receive(:info).with(
-        "Welcome email to email@example.com queued for delivery"
+        text_body: "Welcome to Bookshelf Bookshelf user",
+        html_body: "<p>Welcome to Bookshelf Bookshelf user</p>"
       )
 
       send.call(name: "Bookshelf user", email_address: "email@example.com")

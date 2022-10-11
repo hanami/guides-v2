@@ -136,7 +136,7 @@ module Bookshelf
 end
 ```
 
-This class allows you to configure application-level behaviours, while also providing a way to do things like booting your application, or starting or stopping your application's [providers](/docs/application-structure/providers).
+This class allows you to configure application-level behaviours, while also providing a way to do things like booting your application, or starting or stopping your application's [providers](/docs/application-architecture/providers).
 
 It's also the interface some core components, such as your application's settings, via `Hanami.app["settings"]`, and its logger, via `Hanami.app["logger"]`.
 
@@ -228,4 +228,4 @@ We'll see most of these commands at play in this guide. For complete information
 
 ## What's next?
 
-Now that we're a little acquainted, let's examine the structure of a Hanami application in more detail through [containers, providers and slices](/docs/category/application-structure).
+Now that we're a little acquainted, let's examine the structure of a Hanami application in more detail through [containers, providers and slices](/docs/category/application-architecture).

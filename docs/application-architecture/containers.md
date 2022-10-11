@@ -6,11 +6,11 @@ sidebar_position: 1
 
 In Hanami, the application code you add to your `/app` directory is automatically organised into a container. This container forms the basis of a depenency injection system, in which the dependencies of the components you create are provided to them automatically.
 
-Let's take a look at what this means in practice.
+Let's take a look at how this works in practice.
 
 Imagine we're building a Bookshelf notifications service for sending notifications to users of the Bookshelf platform. After running `hanami new notifications_service`, our first task is to send welcome emails. To achieve this, we want to provide a `POST /welcome-emails` action that will send a welcome email, probably via a send welcome operation, which in turn will want to render our email in both html and plain text.
 
-As a first pass, we might add four Ruby classes to our `/app` folder - our action, operation, and two renderers.
+As a first pass, we might add four Ruby classes to our `app` folder - our action, operation, and two renderers.
 
 On the file system, this might look like:
 
@@ -28,7 +28,7 @@ app
             └── text.rb
 ```
 
-When our application boots, Hanami will automatically create instances of these components and register them in its __app container__, under a key based on their Ruby namespace.
+When our application boots, Hanami will automatically create __instances__ of these components and register them in its __app container__, under a key based on their Ruby namespace.
 
 For example, an instance of our `NotificationsService::Emails::Welcome::Operations::Send` class will be registered under the key `"emails.welcome.operations.send"`.
 

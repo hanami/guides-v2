@@ -4,13 +4,13 @@ sidebar_position: 2
 
 # Providers
 
-Providers are a way to register components with your containers, outside of the automatic registration mechanism detailed in [containers and depenencies](/docs/application-structure/containers).
+Providers are a way to register components with your containers, outside of the automatic registration mechanism detailed in [containers and dependencies](/docs/application-architecture/containers).
 
 Providers are useful when:
 
-- you need to set up a dependency that requires non-trivial configuration (often a third party library, or some library-like code in your `/lib` directory)
+- you need to set up a dependency that requires non-trivial configuration (often a third party library, or some library-like code in your `lib` directory)
 - you want to take advantage of provider lifecycle methods (prepare, start and stop)
-- you want to share a component across both your app container and the containers of all your [slices](/docs/application-structure/slices).
+- you want to share a component across both your app container and the containers of all your [slices](/docs/application-architecture/slices).
 
 App-level providers should be placed in the `config/providers` directory. Slices can have their own providers also, placed in `slices/my_slice/providers`.
 

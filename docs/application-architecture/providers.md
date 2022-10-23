@@ -4,17 +4,15 @@ sidebar_position: 2
 
 # Providers
 
-Providers are a way to register components with your containers, outside of the automatic registration mechanism detailed in [containers and dependencies](/docs/application-architecture/containers).
+Providers are a way to register components with your containers, outside of the automatic registration mechanism detailed in [containers and components](/docs/application-architecture/containers).
 
 Providers are useful when:
 
+- you want to register a specific instance of an object as a component, and have that very same instance be available as a dependency
 - you need to set up a dependency that requires non-trivial configuration (often a third party library, or some library-like code in your `lib` directory)
 - you want to take advantage of provider lifecycle methods (prepare, start and stop)
-- you want to share a component across both your app container and the containers of all your [slices](/docs/application-architecture/slices).
 
-App-level providers should be placed in the `config/providers` directory. Slices can have their own providers also, placed in `slices/my_slice/providers`.
-
-Here's an example provider for that registers an email client in the app container, using an imagined third-party Acme Email service.
+Providers should be placed in the `config/providers` directory. Here's an example provider for that registers a client for an imagined third-party Acme Email delivery service.
 
 ```ruby title="config/providers/email_client.rb"
 # frozen_string_literal: true
@@ -35,44 +33,46 @@ Hanami.app.register_provider(:email_client) do
 end
 ```
 
-The above provider initializes an instance of Acme's email client, providing an api key from the application's setting as well as a default from address, then registers the client in the app container with the key `"email_client"`.
+The above provider creates an instance of Acme's email client, using an API key from our application's settings, then registers the client in the app container with the key `"email_client"`.
 
-The registered dependency can now be used in app components, via `include Deps["email_client"]`:
+The registered dependency can now become a dependency for other components, via `include Deps["email_client"]`:
 
-```ruby title="app/emails/welcome/operations/send.rb"
+```ruby title="app/operations/send_welcome_email.rb"
 # frozen_string_literal: true
 
-module NotificationsService
-  module Emails
-    module Welcome
-      module Operations
-        class Send
-          include Deps["email_client", "settings"]
+module Bookshelf
+  module Operations
+    class SendWelcomeEmail
+      include Deps[
+        "email_client",
+        "renderers.welcome_email"
+      ]
 
-          def call(name:, email_address:)
-            return unless settings.email_sending_enabled
-
-            email_client.deliver(
-              to: email_address,
-              subject: "Welcome!",
-              text_body: "Welcome to Bookshelf #{name}"
-            )
-          end
-        end
+      def call(name:, email_address:)
+        email_client.deliver(
+          to: email_address,
+          subject: "Welcome!",
+          text_body: welcome_email.render_text(name: name),
+          html_body: welcome_email.render_html(name: name)
+        )
       end
     end
   end
 end
 ```
 
-Every provider has a name (`Hanami.app.register_provider(:my_provider_name)`) and registers _one or more_ related components with the relevant container. Registered items are not limited to objects - they can be classes too.
+Every provider has a name (`Hanami.app.register_provider(:my_provider_name)`) and will usually register _one or more_ related components with the relevant container.
 
-```ruby title="config/providers/something_provider.rb"
+Registered components can be any kind of object - they can be classes too.
+
+To register an item with the container, providers call `register`, which takes two arguments: the _key_ to be used, and the _item_ to register under it.
+
+```ruby title="config/providers/my_provider.rb"
 # frozen_string_literal: true
 
-Hanami.app.register_provider(:something_provider) do
+Hanami.app.register_provider(:my_provider) do
   start do
-    register "something", Something.new
+    register "my_thing", MyThing.new
     register "another.thing", AnotherThing.new
     register "thing", Thing
   end
@@ -83,16 +83,16 @@ end
 
 Providers offer a three-stage lifecycle: `prepare`, `start`, and `stop`. Each has a distinct purpose:
 
-- prepare - basic setup code, here you can require 3rd party code and perform basic configuration
+- prepare - basic setup code, here you can require third-party code, or code from your `lib` directory, and perform basic configuration
 - start - code that needs to run for a component to be usable at runtime
 - stop - code that needs to run to stop a component, perhaps to close a database connection, or purge some artifacts.
 
 ```ruby title="config/providers/database.rb"
 Hanami.app.register_provider(:database) do
   prepare do
-    require "3rd_party/db"
+    require "acme/db"
 
-    register "database", 3rdParty::DB.configure(target["settings"].database_url)
+    register "database", Acme::DB.configure(target["settings"].database_url)
   end
 
   start do
@@ -105,17 +105,17 @@ Hanami.app.register_provider(:database) do
 end
 ```
 
-Lifecycle steps will not run until a provider is required by another component, is started directly, or when the container finalizes as a result of Hanami booting.
+A provider's prepare and start steps will run as necessary when a component that the provider registers is used by another component at runtime.
 
-`Hanami.boot` and `Hanami.shutdown` call `start` and `stop` respectively on each of the application’s registered providers.
+`Hanami.boot` calls `start` on each of your application’s providers, meaning each of your providers is started automatically when your application boots. Similarly, `Hanami.shutdown` can be invoked to call `stop` on each provider.
 
-Lifecycle transitions can be triggered directly by using `Hanami.app.container.prepare(:provider_name)`, `Hanami.app.container.start(:provider_name)` and `Hanami.app.container.stop(:provider_name)`.
+You can also trigger lifecycle transitions directly by using `Hanami.app.prepare(:provider_name)`, `Hanami.app.start(:provider_name)` and `Hanami.app.stop(:provider_name)`.
 
 ## Accessing the container via `#target`
 
-Within a provider, the `target` method (also available as `target_container`) can be used to access the container (either the app container, or, if the provider is specific to a slice, the slice's container).
+Within a provider, the `target` method (also available as `target_container`) can be used to access the app container.
 
-This is useful for accessing the application's settings or logger (via `target["settings]` and `target["logger"]`). It can also be used when a provider wants to ensure another provider has started before starting itself, via `target.start(:provider_name)`:
+This is useful if your provider needs to use other components within the container, for example the application's settings or logger (via `target["settings]` and `target["logger"]`). It can also be used when a provider wants to ensure another provider has started before starting itself, via `target.start(:provider_name)`:
 
 ```ruby title="config/providers/uploads_bucket"
 Hanami.app.register_provider(:uploads_bucket) do

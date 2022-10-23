@@ -2,301 +2,309 @@
 sidebar_position: 1
 ---
 
-# Containers and dependencies
+# Containers and components
 
-In Hanami, the application code you add to your `/app` directory is automatically organised into a container. This container forms the basis of a depenency injection system, in which the dependencies of the components you create are provided to them automatically.
+In Hanami, the application code you add to your `app` directory is automatically organised into a **container**, which forms the basis of a **component management system**.
 
-Let's take a look at how this works in practice.
+What's a component? A component is an object that's used within your application. For example, a HTTP action for responding to requests, a validation contract for verifying data, an operation for writing to the database, or a client that calls an external API.
 
-Imagine we're building a Bookshelf notifications service for sending notifications to users of the Bookshelf platform. After running `hanami new notifications_service`, our first task is to send welcome emails. To achieve this, we want to provide a `POST /welcome-emails` action that will send a welcome email, probably via a send welcome operation, which in turn will want to render our email in both html and plain text.
+Ideally, each component in your application has a single responsibility. Very often, one component will need to use other components to achieve its work. When this happens, we call those latter components **dependencies**.
 
-As a first pass, we might add four Ruby classes to our `app` folder - our action, operation, and two renderers.
+Hanami is designed to make it easy to create applications that are systems of well-formed components with clear dependencies.
 
-On the file system, this might look like:
+Let's take a look at how this works in practice!
+
+Imagine we want our Bookshelf application to send welcome emails to new users. Assuming that we're already handling user sign ups, our task is now to create an operation for sending the welcome email. We're going to use an external mail delivery service, while sending email in both html and plain text.
+
+To acheive this, we first add two new components to our application: a _send welcome email operation_, and a _welcome email renderer_.
+
+On the file system, this looks like:
 
 ```shell
 app
-├── actions
-│   └── welcome_emails
-│       └── create.rb
-└── emails
-    └── welcome
-        ├── operations
-        │   └── send.rb
-        └── renderers
-            ├── html.rb
-            └── text.rb
+├── operations
+│   └── send_welcome_email.rb
+└── renderers
+    └── welcome_email.rb
 ```
 
-When our application boots, Hanami will automatically create __instances__ of these components and register them in its __app container__, under a key based on their Ruby namespace.
+Sketching out a send welcome email operation component:
 
-For example, an instance of our `NotificationsService::Emails::Welcome::Operations::Send` class will be registered under the key `"emails.welcome.operations.send"`.
-
-```ruby title="app/emails/welcome/operations/send.rb"
+```ruby title="app/operations/send_welcome_email.rb"
 # frozen_string_literal: true
 
-module NotificationService
-  module Emails
-    module Welcome
-      module Operations
-        class Send
-          def call(name:, email_address:)
-            puts "Sending greetings to #{name} via #{email_address}!"
-          end
-        end
+module Bookshelf
+  module Operations
+    class SendWelcomeEmail
+      def call(name:, email_address:)
+        # Send a welcome email to the user here...
       end
     end
   end
 end
 ```
+
+And a welcome email renderer component:
+
+```ruby title="app/renderers/welcome_email.rb"
+# frozen_string_literal: true
+
+module Bookshelf
+  module Renderers
+    class WelcomeEmail
+      def render_html(name:)
+        "<p>Welcome to Bookshelf #{name}!</p>"
+      end
+
+      def render_text(name:)
+        "Welcome to Bookshelf #{name}!"
+      end
+    end
+  end
+end
+```
+
+When our application boots, Hanami will automatically register these classes as components in its __app container__, each under a __key__ based on their Ruby class name.
+
+This means that an instance of the `Bookshelf::Operations::SendWelcomeEmail` class is available in the container under the key `"operations.send_welcome_email"`, while an instance of `Bookshelf::Renderers::WelcomeEmail` is available under the key `"renderers.welcome_email"`.
 
 We can see this in the Hanami console if we boot our application and ask what keys are registered with the app container:
 
 ```ruby
 bundle exec hanami console
 
-notifications_service[development]> Hanami.app.boot
-=> NotificationsService::App
+bookshelf[development]> Hanami.app.boot
+=> Bookshelf::App
 
-notifications_service[development]> Hanami.app.keys
+bookshelf[development]> Hanami.app.keys
 => ["notifications",
  "settings",
  "routes",
  "inflector",
  "logger",
  "rack.monitor",
- "actions.welcome_emails.create",
- "emails.welcome.operations.send",
- "emails.welcome.renderers.html",
- "emails.welcome.renderers.text"]
+ "operations.send_welcome_email",
+ "renderers.welcome_email"]
  ```
 
-To fetch our welcome email send operation from the container, we ask for it by its `"emails.welcome.operations.send"` key:
+To fetch our welcome email send operation from the container, we can ask for it by its `"operations.send_welcome_email"` key:
 
 ```ruby
-notifications_service[development]> Hanami.app["emails.welcome.operations.send"]
-=> #<NotificationsService::Emails::Welcome::Operations::Send:0x000000010df0a1a0>
-
-notifications_service[development]> Hanami.app["emails.welcome.operations.send"].call(name: "New user", email_address: "email@example.com")
-Sending greetings to New user email@example.com!
+bookshelf[development]> Hanami.app["operations.send_welcome_email"]
+=> #<Bookshelf::Operations::SendWelcomeEmail:0x00000001055dadd0>
 ```
 
-Most of the time however, you won't use the container directly via `Hanami.app`, but will instead make use of the container through the dependency injection system it supports. Let's see how that works!
+Similarly we can fetch and call the renderer via the `"renderers.welcome_email"` key:
+
+```ruby
+bookshelf[development]> Hanami.app["renderers.welcome_email"]
+=> #<Bookshelf::Renderers::WelcomeEmail:0x000000010577afc8>
+
+bookshelf[development]> Hanami.app["renderers.welcome_email"].render_html(name: "Ada")
+=> "<p>Welcome to Bookshelf Ada!</p>"
+```
+
+Most of the time however, you won't work with components directly through the container via `Hanami.app`. Instead, you'll work with components through the convenient __dependency injection__ system that having your components in a container supports. Let's see how that works!
 
 ## Dependency injection
 
-Dependency injection is a software pattern where, rather than a component knowing how to instantiate its dependencies, the dependencies are instead provided to it. This means its dependencies can be abstract rather than hard coded, making the component more flexible, reusable and easier to test.
+Dependency injection is a software pattern where, rather than a component knowing how to instantiate its dependencies, those dependencies are instead provided to it. This means the dependencies can be abstract rather than hard coded, making the component more flexible, reusable and easier to test.
 
-To illustrate, here's an example of a welcome email send operation which _doesn't_ use dependency injection:
+To illustrate, here's an example of a send welcome email operation which _doesn't_ use dependency injection:
 
-```ruby title="app/emails/welcome/operations/send.rb"
+```ruby title="app/operations/send_welcome_email.rb"
 # frozen_string_literal: true
 
 require "acme_email/client"
 
-module NotificationsService
-  module Emails
-    module Welcome
-      module Operations
-        class Send
-          def call(name:, email_address:)
-            return unless Hanami::Settings.new.email_sending_enabled
+module Bookshelf
+  module Operations
+    class SendWelcomeEmail
+      def call(name:, email_address:)
+        email_client = AcmeEmail::Client.new
 
-            AcmeEmail::Client.new.deliver(
-              to: email_address,
-              subject: "Welcome!",
-              text_body: Renderers::Text.new.call(name: name),
-              html_body: Renderers::Html.new.call(name: name)
-            )
-          end
-        end
+        email_renderer = Renderers::WelcomeEmail.new
+
+        email_client.deliver(
+          to: email_address,
+          subject: "Welcome!",
+          text_body: email_renderer.render_text(name: name),
+          html_body: email_renderer.render_html(name: name)
+        )
       end
     end
   end
 end
 ```
 
-This component has four dependencies, each of which is a "hard coded" reference to a concrete Ruby class:
+This component has two dependencies, each of which is a "hard coded" reference to a concrete Ruby class:
 
-- `Hanami::Settings`, used to check whether email sending is enabled in the current environment.
-- `AcmeEmail::Client`, used to queue the email for delivery via the third party Acme Email service.
-- `Renderers::Text`, used to render the text version of the welcome email.
-- `Renderers::Html`, used to render the html version of the welcome email.
+- `AcmeEmail::Client`, used to send an email via the third party Acme Email service.
+- `Renderers::WelcomeEmail`, used to render text and html versions of the welcome email.
 
-To make our send welcome email operation more resuable and easier to test, we could instead _inject_ its dependencies when we initialize it:
+To make this send welcome email operation more resuable and easier to test, we could instead _inject_ its dependencies when we initialize it:
 
-```ruby title="app/emails/welcome/operations/send.rb"
+```ruby title="app/operations/send_welcome_email.rb"
 # frozen_string_literal: true
 
-module NotificationsService
-  module Emails
-    module Welcome
-      module Operations
-        class Send
-          attr_reader :email_client
-          attr_reader :settings
-          attr_reader :text
-          attr_reader :html
+require "acme_email/client"
 
-          def initialize(email_client:, settings:, text:, html:)
-            @email_client = email_client
-            @settings = settings
-            @text = text
-            @html = html
-          end
+module Bookshelf
+  module Operations
+    class SendWelcomeEmail
+      attr_reader :email_client
+      attr_reader :email_renderer
 
-          def call(name:, email_address:)
-            return unless settings.email_sending_enabled
+      def initialize(email_client:, email_renderer:)
+        @email_client = email_client
+        @email_renderer = email_renderer
+      end
 
-            email_client.deliver(
-              to: email_address,
-              subject: "Welcome!",
-              text_body: text.call(name: name)
-              html_body: html.call(name: name)
-            )
-          end
-        end
+      def call(name:, email_address:)
+        email_client.deliver(
+          to: email_address,
+          subject: "Welcome!",
+          text_body: email_renderer.render_text(name: name),
+          html_body: email_renderer.render_html(name: name)
+        )
       end
     end
   end
 end
 ```
 
-As a result of injection, our component no longer has rigid dependencies - it's able to use any email client, settings object or renderers we provide.
+As a result of injection, this component no longer has rigid dependencies - it's able to use any email client and email renderer it's provided.
 
-Hanami makes this style of dependency injection simple through an `include Deps[]` mechanism. Built into the app container (and all slice containers), `include Deps[]` allows a component to use any other component in its container as a dependency, while removing the need for any attr_reader or initializer boilerplate:
+Hanami makes this style of dependency injection simple through its `Deps` mixin. Built into the component management system, and invoked through the use of `include Deps["key"]`, the `Deps` mixin allows a component to use any other component in its container as a dependency, while removing the need for any attr_reader or initializer boilerplate:
 
-```ruby title="app/emails/welcome/operations/send.rb"
+```ruby title="app/operations/send_welcome_email.rb"
 # frozen_string_literal: true
 
-module NotificationsService
-  module Emails
-    module Welcome
-      module Operations
-        class Send
-          include Deps[
-            "settings",
-            "email_client",
-            "emails.welcome.renderers.text",
-            "emails.welcome.renderers.html"
-          ]
+module Bookshelf
+  module Operations
+    class SendWelcomeEmail
+      include Deps[
+        "email_client",
+        "renderers.welcome_email"
+      ]
 
-          def call(name:, email_address:)
-            return unless settings.email_sending_enabled
-
-            email_client.deliver(
-              to: email_address,
-              subject: "Welcome!",
-              text_body: text.call(name: name),
-              html_body: html.call(name: name)
-            )
-          end
-        end
+      def call(name:, email_address:)
+        email_client.deliver(
+          to: email_address,
+          subject: "Welcome!",
+          text_body: welcome_email.render_text(name: name),
+          html_body: welcome_email.render_html(name: name)
+        )
       end
     end
   end
 end
 ```
 
-## Injecting dependencies via `include Deps[]`
+## Injecting dependencies via `Deps`
 
-In the above example the `include Deps[]` mechanism takes each given key and makes the relevant component from the app container available via an instance method of the same name. i.e. `include Deps["settings"]` makes the `settings` registration from the app container available anywhere in the class via the `#settings` method. By default, dependencies are made available under a method named after the last segment of their key. So `include Deps["emails.welcome.renderers.html"]` makes the html renderer available via the method `#html`.
+In the above example, the `Deps` mixin takes each given key and makes the relevant component from the app container available within the current component via an instance method.
 
-We can see `include Deps[]` in action in the console if we instantiate an instance of our send welcome email operation:
+i.e. this code:
 
 ```ruby
-notifications_service[development]> NotificationsService::Emails::Welcome::Operations::Send.new
-=> #<NotificationsService::Emails::Welcome::Operations::Send:0x000000010c843660
- @email_client=#<AcmeEmail::Client:0x000000010c808858>,
- @html=#<NotificationsService::Emails::Welcome::Renderers::Html:0x000000010c843818>,
- @settings=
-  #<NotificationsService::Settings:0x000000010c4bf340
-   @config=#<Dry::Configurable::Config values={:email_sending_enabled=>true}>>,
- @text=#<NotificationsService::Emails::Welcome::Renderers::Text:0x000000010c858628>>
+include Deps[
+  "email_client",
+  "renderers.welcome_email"
+]
 ```
 
-We can provide different dependencies during initialization:
+makes the `"email_client"` component from the container available via an `#email_client` method, and the `"renderers.welcome_email"` component available via `#welcome_email`.
+
+By default, dependencies are made available under a method named after the last segment of their key. So `include Deps["renderers.welcome_email"]` allows us to call `#welcome_email` anywhere in our `SendWelcomeEmail` class access the welcome email renderer.
+
+We can see `Deps` in action in the console if we instantiate an instance of our send welcome email operation:
 
 ```ruby
-notifications_service[development]> NotificationsService::Emails::Welcome::Operations::Send.new(email_client: "another client")
-=> #<NotificationsService::Emails::Welcome::Operations::Send:0x000000010c1ded88
+bookshelf[development]> Bookshelf::Operations::SendWelcomeEmail.new
+=> #<Bookshelf::Operations::SendWelcomeEmail:0x0000000112a93090
+ @email_client=#<AcmeEmail::Client:0x0000000112aa82d8>,
+ @welcome_email=#<Bookshelf::Renderers::WelcomeEmail:0x0000000112a931d0>>
+```
+
+We can choose to provide different dependencies during initialization:
+
+```ruby
+bookshelf[development]> Bookshelf::Operations::SendWelcomeEmail.new(email_client: "another client")
+=> #<Bookshelf::Operations::SendWelcomeEmail:0x0000000112aba8c0
  @email_client="another client",
- @html=#<NotificationsService::Emails::Welcome::Renderers::Html:0x000000010c1df1c0>,
- @settings=
-  #<NotificationsService::Settings:0x000000010c4bf340
-   @config=#<Dry::Configurable::Config values={:email_sending_enabled=>true, :acme_api_key=>"sdf"}>>,
- @text=#<NotificationsService::Emails::Welcome::Renderers::Text:0x000000010c28ca50>>
+ @welcome_email=#<Bookshelf::Renderers::WelcomeEmail:0x0000000112aba9b0>>
 ```
 
 This behaviour is particularly useful when testing, as you can substitute one or more components to test behaviour.
 
 In this unit test, we substitute each of the operation's dependencies in order to unit test its behaviour:
 
-```ruby title="spec/unit/emails/welcome/operations/send_spec.rb"
-RSpec.describe NotificationsService::Emails::Welcome::Operations::Send, "#call" do
-  subject(:send) {
-    described_class.new(
-      email_client: email_client,
-      settings: settings,
-      text: text,
-      html: html
-    )
+```ruby title="spec/unit/operations/send_welcome_email_spec.rb"
+RSpec.describe Bookshelf::Operations::SendWelcomeEmail, "#call" do
+  subject(:send_welcome_email) {
+    described_class.new(email_client: email_client, welcome_email: welcome_email)
   }
 
   let(:email_client) { double(:email_client) }
-  let(:text) { double(:text, call: "Welcome to Bookshelf Bookshelf user") }
-  let(:html) { double(:html, call: "<p>Welcome to Bookshelf Bookshelf user</p>") }
+  let(:welcome_email) { double(:welcome_email) }
 
-  context "when email sending is enabled" do
-    let(:settings) { double(:settings, email_sending_enabled: true) }
-
-    it "delivers an email using the email client" do
-      expect(email_client).to receive(:deliver).with(
-        to: "email@example.com",
-        subject: "Welcome!",
-        text_body: "Welcome to Bookshelf Bookshelf user",
-        html_body: "<p>Welcome to Bookshelf Bookshelf user</p>"
-      )
-
-      send.call(name: "Bookshelf user", email_address: "email@example.com")
-    end
+  before do
+    allow(welcome_email).to receive(:render_text).and_return("Welcome to Bookshelf Ada!")
+    allow(welcome_email).to receive(:render_html).and_return("<p>Welcome to Bookshelf Ada!</p>")
   end
 
-  context "when email sending is not enabled" do
-    let(:settings) { double(:settings, email_sending_enabled: false) }
+  it "sends a welcome email" do
+    expect(email_client).to receive(:deliver).with(
+      to: "ada@example.com",
+      subject: "Welcome!",
+      text_body: "Welcome to Bookshelf Ada!",
+      html_body: "<p>Welcome to Bookshelf Ada!</p>"
+    )
 
-    it "does not deliver an email" do
-      expect(email_client).not_to receive(:deliver)
+    send_welcome_email.call(name: "Ada!", email_address: "ada@example.com")
+  end
+end
+```
 
-      send.call(name: "Bookshelf user", email_address: "email@example.com")
+Exactly which dependency to stub using RSpec mocks is up to you - if a depenency is left out of the constructor within the spec, then the real dependency is resolved from the container. This means that every test can decide exactly which dependencies to replace.
+
+## Renaming dependencies
+
+Sometimes you want to use a dependency under another name, either because two dependencies end with the same suffix, or just because it makes things clearer in a different context.
+
+This can be done by using the `Deps` mixin like so:
+
+```ruby title="app/operations/send_welcome_email.rb"
+# frozen_string_literal: true
+
+module Bookshelf
+  module Operations
+    class SendWelcomeEmail
+      include Deps[
+        "email_client",
+        email_renderer: "renderers.welcome_email"
+      ]
+
+      def call(name:, email_address:)
+        email_client.deliver(
+          to: email_address,
+          subject: "Welcome!",
+          text_body: email_renderer.render_text(name: name),
+          html_body: email_renderer.render_html(name: name)
+        )
+      end
     end
   end
 end
 ```
 
-Exactly which dependency to stub using RSpec mocks is up to you - if a depenency is left out of the constructor within the spec, then the real dependency is resolved from the container. Every test can decide exactly which dependencies to replace.
-
-## Renaming dependencies
-
-Sometimes you want to use a dependency under another name (either because two dependencies end with the same suffix, or just because it makes things clearer in a different context).
-
-This can be done with `include Deps[]` like so:
+Above, the welcome email renderer is now available via the `#email_renderer` method, rather than via `#welcome_email`. When testing, the renderer can now be substituted by providing `email_renderer` to the constructor:
 
 ```ruby
-module NotificationsService
-  class NewBookNotification
-    include Deps[
-      "settings",
-      send_email_notification: "emails.book_added.operations.send",
-      send_slack_notification: "slack_notifications.book_added.operations.send"
-    ]
-
-    def call(...)
-      send_email_notification.call(...) if settings.email_sending_enabled
-      send_slack_notification.call(...) if settings.slack_sending_enabled
-    end
-  end
-end
+subject(:send_welcome_email) {
+  described_class.new(email_client: mock_email_client, email_renderer: mock_email_renderer)
+}
 ```
 
 ## Opting out of the container
@@ -311,44 +319,103 @@ For once-off exclusions like this Hanami supports a magic comment: `# auto_regis
 
 require "hanami/action"
 
-module NotificationsService
+module Bookshelf
   class Action < Hanami::Action
   end
 end
 ```
 
-Another alternative for classes you do not want to be registered in your container is to place them in `/lib`.
+If you have a whole class of objects that shouldn't be placed in your container, you can configure your Hanami application to exclude an entire directory from auto registration by adjusting its `no_auto_register_paths` configuration.
 
-If you have a whole class of objects that shouldn't be placed in your container, you can configure your Hanami application (or slice) to exclude an entire directory from auto registration by adjusting its `no_auto_register_paths` configuration.
-
-Here for example, the `app/structs` directory is excluded:
+Here for example, the `app/structs` directory is excluded, meaning nothing in the `app/structs` directory will be registered with the container:
 
 ```ruby title="config/app.rb"
 # frozen_string_literal: true
 
 require "hanami"
 
-module NotificationsService
+module Bookshelf
   class App < Hanami::App
     config.no_auto_register_paths << "structs"
   end
 end
 ```
 
-## Container behaviour: prepare vs boot
+A third alternative for classes you do not want to be registered in your container is to place them in the `lib` directory at the root of your project.
 
-Hanami supports a **prepared** state and a **booted** state.
+For example, this `SlackNotifier` class can be used anywhere in your application, and is not registered in the container:
+
+```ruby title="lib/bookshelf/slack_notifier.rb"
+module Bookshelf
+  class SlackNotifier
+    def self.notify(message)
+      # ...
+    end
+  end
+end
+```
+
+```ruby title="app/operations/send_welcome_email.rb"
+# frozen_string_literal: true
+
+module Bookshelf
+  module Operations
+    class SendWelcomeEmail
+      include Deps[
+        "email_client",
+        "renderers.welcome_email"
+      ]
+
+      def call(name:, email_address:)
+        email_client.deliver(
+          to: email_address,
+          subject: "Welcome!",
+          text_body: welcome_email.render_text(name: name),
+          html_body: welcome_email.render_html(name: name)
+        )
+
+        SlackNotifier.notify("Welcome email sent to #{email_address}")
+      end
+    end
+  end
+end
+```
+
+
+
+:::tip Autoloading and the `lib` directory
+
+[Zeitwerk](https://github.com/fxn/zeitwerk) autoloading is in place for code you put in `lib/<app_name>`, meaning that you do not need to use a `require` statement before using it.
+
+Code that you place in other directories under `lib` needs to be explicitly required before use.
+
+| Constant location               | Usage                                      |
+|---------------------------------|--------------------------------------------|
+| lib/bookshelf/slack_notifier.rb | Bookshelf::SlackNotifier                   |
+| lib/my_redis/client.rb          | require "my_redis/client"<br /><br />  MyRedis::Client |
+
+:::
+
+## Container compontent loading
+
+Hanami applications support a **prepared** state and a **booted** state.
+
+Whether your app is prepared or booted determines whether components in your app container are _lazily_ loaded on demand, or _eagerly_ loaded up front.
 
 ### Hanami.prepare
 
-When you call `Hanami.prepare` (or use `require "hanami/prepare"`) Hanami will make its app and slices available, but components within containers will be **lazily loaded**.
+When you call `Hanami.prepare` (or use `require "hanami/prepare"`) Hanami will make its app available, but components within the app container will be **lazily loaded**.
 
 This is useful for minimizing load time. It's the default mode in the Hanami console and when running tests.
 
-It can also be very useful when running Hanami in serverless environments where boot time matters, such as on AWS Lambda, as Hanami will instantiate only the components needed to satisfy a particular web request or operation.
-
 ### Hanami.boot
 
-When you call `Hanami.boot` (or use `require "hanami/boot"`) Hanami will go one step further and **eagerly load** all components in all containers up front.
+When you call `Hanami.boot` (or use `require "hanami/boot"`) Hanami will go one step further and **eagerly load** all components up front.
 
-This is useful in contexts where you want to incur initialization costs up front, such as when preparing your application to serve web requests. It's the default when running via Hanami's puma setup (see `config.ru`).
+This is useful in contexts where you want to incur initialization costs at boot time, such as when preparing your application to serve web requests. It's the default when running via Hanami's puma setup (see `config.ru`).
+
+## What's next?
+
+Reading the above examples, you may have wondered where the `"email_client"` component came from, given it wasn't defined in the `app` directory.
+
+Hanami offers a mechanism called **providers** for adding components to a container outside of the auto-registration process. We'll look at providers next.

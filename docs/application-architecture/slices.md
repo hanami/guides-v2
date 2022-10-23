@@ -6,34 +6,31 @@ sidebar_position: 3
 
 In addition to the `app` directory, Hanami also supports organising your application code into **slices**.
 
-You can think of slices as distinct modules of your application. A typical case is to use slices to separate your business domains (for example billing, accounting or admin) or to separate modules by feature or concern (api or search).
+You can think of slices as distinct modules of your application. A typical case is to use slices to separate your business domains (for example billing, accounting or admin) or to have separate modules for a particular feature (API) or technical concern (search).
 
 Slices exist in the `slices` directory.
 ## Creating a slice
 
-To create a slice, you can either create a new directory in `slices`:
+Hanami provides a slice generator. To create an API slice, run `bundle exec hanami generate slice api`.
+
+This creates a directory in `slices`, adding some slice-specific classes like actions:
+
+```shell
+bundle exec hanami generate slice api
+
+slices
+└── api
+    ├── action.rb
+    └── actions
+```
+
+Simply creating a new directory in `slices` will also create a slice:
 
 ```shell
 mkdir -p slices/admin
 
 slices
 └── admin
-
-bundle exec hanami console
-Admin::Slice
-=> Admin::Slice
-```
-
-Or run `bundle exec hanami generate slice api`, which has the added benefit of adding some slice-specific classes, like actions:
-
-```shell
-bundle exec hanami generate slice api
-
-slices
-├── admin
-└── api
-    ├── action.rb
-    └── actions
 ```
 
 ## Features of a slice
@@ -42,7 +39,7 @@ Slices offer much of the same behaviour and features as Hanami's `app` folder.
 
 A Hanami slice:
 
-- has its own container (e.g. `API::Slice.container`)
+- has its own container
 - can have its own providers (e.g. `slices/api/providers/my_provider.rb`)
 - can include actions, routable from the application's router
 - can import and export components from other slices
@@ -53,7 +50,7 @@ A Hanami slice:
 
 Like Hanami's `app` folder, components added to a Hanami slice are automatically organised into the slice's container.
 
-For example, suppose our Bookshelf application, which catalogues international books, is in need of an API to return the name, flag, and currency of a given country. We might create a show action in our API slice (by adding the file manually or by running `bundle exec hanami generate action countries.show --slice api`), that looks something like:
+For example, suppose our Bookshelf application, which catalogues international books, needs an API to return the name, flag, and currency of a given country. We can create a countries show action in our API slice (by running `bundle exec hanami generate action countries.show --slice api` or by adding the file manually) that looks like:
 
 ```ruby title="slices/api/actions/countries/show.rb"
 # frozen_string_literal: true
@@ -89,9 +86,9 @@ module API
 end
 ```
 
-This action checks that the provided country code (`request.params[:country_code]`) is a valid ISO3166 code (using the countries gem) and returns a 422 response if it isn't.
+This action uses the countries gem to check that the provided country code (`request.params[:country_code]`) is a valid ISO3166 code and returns a 422 response if it isn't.
 
-If the code is valid, the action calls the countries show query (by including the `"queries.countries.show"` item from the slice's container - aliased here as `query` for readability). That class might look like:
+If the code is valid, the action calls the countries show query (aliased here as `query` for readability). That class might look like:
 
 ```ruby title="slices/api/queries/countries/show.rb"
 # frozen_string_literal: true
@@ -174,14 +171,13 @@ Suppose that our bookshelf application uses a content delivery network (CDN) to 
 
 Images can be updated in one of two ways: the publisher of the book can sign in and upload a new image, or a Bookshelf staff member can use an admin interface to update an image on the publisher's behalf.
 
-In our bookshelf app, an `Admin` supports the latter functionality, and a `Publisher` slice the former. Both these slices want to trigger a CDN purge when a book cover is updated, but neither slice necessarily needs to know how that's acheived. Instead, a `CDN` slice can manage this operation.
+In our bookshelf app, an `Admin` slice supports the latter functionality, and a `Publisher` slice the former. Both these slices want to trigger a CDN purge when a book cover is updated, but neither slice needs to know exactly how that's achieved. Instead, a `CDN` slice can manage this operation.
 
 ```ruby title="slices/cdn/book_covers/purge.rb"
 module CDN
   module BookCovers
     class Purge
       def call(book_cover_path)
-        puts "Purging #{book_cover_path}"
         # "Purging logic here!"
       end
     end
@@ -189,21 +185,9 @@ module CDN
 end
 ```
 
-To allow slices other than the CDN slice to use this component, we first export it from the CDN.
+Slices can be configured by creating a file at `config/slices/slice_name.rb`.
 
-Any slice can be optionally configured by creating a file at `config/slices/slice_name.rb`.
-
-Here, we configure the CDN slice to export is purge component:
-
-```ruby title="config/slices/cdn.rb"
-module CDN
-  class Slice < Hanami::Slice
-    export ["book_covers.purge"]
-  end
-end
-```
-
-Now, the `Admin` slice can be configured to import _everything_ that the CDN slice exports:
+To configure the `Admin` slice to import components from the CDN container (including the purge component above), we can create a `config/slices/admin.rb` file with the following configuration:
 
 ```ruby title="config/slices/admin.rb"
 module Admin
@@ -213,7 +197,7 @@ module Admin
 end
 ```
 
-In action in the console:
+Let's see this import in action in the console, where we can see that the `Admin` slices's container now has a `"cdn.book_covers.purge"` component:
 
 ```ruby
 bundle exec hanami console
@@ -228,7 +212,7 @@ bookshelf[development]> Admin::Slice.boot.keys
  "routes"]
 ```
 
-In use within an admin slice component:
+Using the purge operation from the `CDN` slice within the `Admin` slice component below is now as simple as using the `Deps` mixin:
 
 ```ruby title="slices/admin/books/operations/update.rb"
 module Admin
@@ -252,7 +236,7 @@ module Admin
 end
 ```
 
-It's also possible to import only specific exports from another slice. Here for example, the `Publisher` slice imports strictly the purge operation, while also - for reasons of its own choosing - using the suffix `content_network` instead of `cdn`:
+It's also possible to import only specific components from another slice. Here for example, the `Publisher` slice imports strictly the purge operation, while also - for reasons of its own choosing - using the suffix `content_network` instead of `cdn`:
 
 ```ruby title="config/slices/publisher.rb"
 module Publisher
@@ -276,3 +260,17 @@ bookshelf[development]> Publisher::Slice.boot.keys
  "rack.monitor",
  "routes"]
 ```
+
+Slices can also limit what they make available for export to other slices.
+
+Here, we configure the CDN slice to export only its purge component:
+
+```ruby title="config/slices/cdn.rb"
+module CDN
+  class Slice < Hanami::Slice
+    export ["book_covers.purge"]
+  end
+end
+```
+
+TODO: the rest of slices :)

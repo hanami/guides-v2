@@ -6,9 +6,9 @@ sidebar_position: 1
 
 In Hanami, the application code you add to your `app` directory is automatically organised into a **container**, which forms the basis of a **component management system**.
 
-What's a component? A component is an object that's used within your application. For example, a HTTP action for responding to requests, a validation contract for verifying data, an operation for writing to the database, or a client that calls an external API.
+The **components** within that system are the objects you create to get things done within your application. For example, a HTTP action for responding to requests, a validation contract for verifying data, an operation for writing to the database, or a client that calls an external API.
 
-Ideally, each component in your application has a single responsibility. Very often, one component will need to use other components to achieve its work. When this happens, we call those latter components **dependencies**.
+Ideally, each component in your application has a single responsibility. Very often, one component will need to use other components to achieve its work. When this happens, we call the latter components **dependencies**.
 
 Hanami is designed to make it easy to create applications that are systems of well-formed components with clear dependencies.
 

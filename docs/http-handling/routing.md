@@ -2,13 +2,11 @@
 sidebar_position: 1
 ---
 
-# Routing
+# Routing and actions
 
-Hanami provides a fast, simple router for handling http requests.
+Hanami provides a fast, simple [router](https://github.com/hanami/router) for handling HTTP requests.
 
-To add a route to your application, define it in your `Routes` class in the `config/routes.rb` file.
-
-If you ran `hanami new bookshelf`, your `config/routes.rb` file will look like this:
+Your application's routes are defined within the `Routes` class in the `config/routes.rb` file.
 
 ```ruby title="config/routes.rb"
 # frozen_string_literal: true
@@ -20,60 +18,238 @@ module Bookshelf
 end
 ```
 
-## Composing a route
+## Adding a route
 
-In the Hanami router, each route is comprised of:
+Each route in Hanami's router is comprised of:
+
 - a HTTP method (i.e. `get`, `post`, `put`, `patch`, `delete`, `options` or `trace`)
 - a path
 - an endpoint to be invoked.
 
-Endpoints are usually actions within your application, but they can also be a block, a rack application, or anything that responds to `#call`.
+Endpoints are usually actions within your application, but they can also be a block, a [Rack](https://github.com/rack/rack) application, or anything that responds to `#call`.
 
 ```ruby title="Example routes"
-get "/authors", to: "authors.index"
-get "/authors/:id", to: "authors.show"
-post "/authors", to: "authors.create"
-put "/authors/:id", to: "authors.update"
+get "/books", to: "books.index"  # Invokes the Bookshelf::Actions:Books::Index action
+post "/books", to: "books.create" # Invokes the Bookshelf::Actions:Books::Create action
 get "/rack-app", to: RackApp.new
+get "/my-lambda", to: ->(env) { [200, {}, ["A Rack compatible response"]] }
 ```
 
-A root method defines a root route for handling GET requests to "/". Above, the root path calls a block which returns "Hello from Hanami". You can also invoke an action for root requests by specifying `root to: "my_action"`. For example to invoke a `"home"` action:
+To add a full set of routes for viewing and managing books, you can either manually add the required routes to your `config/routes.rb` file, or use Hanami's action generator, which will generate actions in addition to adding routes for you.
+
+```shell title="Using Hanami's action generator"
+bundle exec hanami generate action books.index
+bundle exec hanami generate action books.show
+bundle exec hanami generate action books.new
+bundle exec hanami generate action books.create
+bundle exec hanami generate action books.update
+bundle exec hanami generate action books.destroy
+```
+
 
 ```ruby title="config/routes.rb"
 # frozen_string_literal: true
 
 module Bookshelf
   class Routes < Hanami::Routes
-    root to: "home"
-  end
-end
-```
-
-Let's add three routes to our bookshelf application: one for listing an index of books, one for showing a particular book, and one for creating a new book.
-
-[Actually, let's add full set of CRUD here to show that off]
-
-```ruby title="config/routes.rb"
-# frozen_string_literal: true
-
-module Bookshelf
-  class Routes < Hanami::Routes
-    root to: "home"
+    root { "Hello from Hanami" }
 
     get "/books", to: "books.index"
     get "/books/:id", to: "books.show"
+    get "/books/new", to: "books.new"
     post "/books", to: "books.create"
+    patch "/books/:id", to: "books.update"
+    delete "/books/:id", to: "books.destroy"
   end
 end
 ```
 
-Hanami provides a `hanami routes` command to inspect your application's routes. Let's run `bundle exec hanami routes` on the command line after adding our new routes:
+
+## Root request routing
+
+A `root` method allows you to define a root route for handling `GET` requests to `"/"`. In a newly generated application, the root path calls a block which returns "Hello from Hanami". You can instead choose to invoke an action by specifying `root to: "my_action"`. For example, with the following configuration, the router will invoke the `"home"` action:
+
+```ruby title="config/routes.rb"
+# frozen_string_literal: true
+
+module Bookshelf
+  class Routes < Hanami::Routes
+    root to: "home"
+  end
+end
+```
+
+## Path matching
+
+The path component of a route supports matching on fixed strings, as well as matching with dynamic variables which can be accessed in Hanami actions via `request.params[:name]`, where `:name` matches the segment's name specified in the path.
+
+### Fixed paths
+
+The following route matches `GET` requests for `"/books"` exactly:
+
+```ruby
+get "/books", to: "books.index"
+```
+
+### Dynamic segments
+
+The path `"/books/:id"` matches `GET` requests like `"/books/1"`:
+
+```ruby
+get "/books/:id", to: "books.show"
+
+# GET /books/1
+# request.params[:id] <-- 1
+```
+
+### Multiple dynamic segments
+
+Paths support multiple dynamic segments. For example, the path `"/books/:book_id/reviews/:id"` matches `GET` requests like `"/books/17/reviews/6"`:
+
+```ruby
+get "/books/:book_id/reviews/:id", to: "book_reviews.show"
+
+# GET /books/17/reviews/6
+# request.params[:book_id] <-- 17
+# request.params[:id] <-- 6
+```
+
+Here's what accessing these variables looks like in a Hanami action:
+
+```ruby title="Route, matching request and resulting params"
+# Route: get "/books/:book_id/reviews/:id", to: "book_reviews.show"
+
+# Request: GET /books/17/reviews/6
+
+module Bookshelf
+  module Actions
+    module BookReviews
+      class Show < Bookshelf::Action
+        def handle(request, response)
+          request.params[:book_id] # 17
+          request.params[:id] # 6
+        end
+      end
+    end
+  end
+end
+```
+
+### Constraints
+
+Constraints can be added when matching variables. Contraints are regular expressions that must match in order for the route to match. They can be useful for ensuring that ids are digits:
+
+```ruby
+get "/books/:id", id: /\d+/, to: "books.show"
+
+# GET /books/2 # matches
+# GET /books/two # will not match
+```
+
+### Globbing and catch all routes
+
+Catch all routes can be added using globbing. These can be used to handle requests that do not match preceeding routes.
+
+For example, in the absence of an earlier matching route, `"/pages/*match"` will match requests for paths like `"/pages/2022/my-page"`:
+
+```ruby
+get "/pages/*path", to: "page_catch_all"
+
+# GET /pages/2022/my-page will invoke the Bookshelf::Actions::PageCatchAll action
+# request.params[:path] # <-- 2022/my-page
+```
+
+To create a catch all to handle all unmatched `GET` requests using a custom `"unmatched"` action, configure this route last:
+
+```ruby
+get "/*path", to: "unmatched"
+```
+
+## Named routes
+
+Routes can be named using the `as` option.
+
+```
+get "/books", to: "books.index", as: :books
+get "/books/:id", to: "books.show", as: :book
+```
+
+This enables `path` and `url` helpers, which can be accessed via the routes helper registered under `"routes"` within your application.
+
+```ruby
+Hanami.app["routes"].path(:books)
+=> "/books"
+
+Hanami.app["routes"].url(:books)
+=> #<URI::HTTP http://0.0.0.0:2300/books>
+```
+
+When a route requires variables, they can be passed to the helper:
+
+```ruby
+Hanami.app["routes"].path(:book, id: 1)
+=> "/books/1"
+
+Hanami.app["routes"].url(:book, id: 1)
+=> #<URI::HTTP http://0.0.0.0:2300/books/1>
+```
+
+
+To set a base URL for the `url` helper, configure it in `config/app.rb`:
+
+```ruby title="config/app.rb"
+# frozen_string_literal: true
+
+require "hanami"
+
+module Bookshelf
+  class App < Hanami::App
+    config.base_url = "https://bookshelf.example.com"
+  end
+end
+```
+
+```ruby
+Hanami.app["routes"].url(:book, id: 1)
+=> #<URI::HTTP https://bookshelf.example.com/books/1>
+```
+
+## Scopes
+
+To nest a series of routes under a particular path, you can set a scope:
+
+```ruby
+# frozen_string_literal: true
+
+module Bookshelf
+  class Routes < Hanami::Routes
+    scope "about" do
+      get "/contact-us", to: "content.contact_us" # <-- /about/contact-us
+      get "/faq", to: "content.faq" # <-- /about/faq
+    end
+  end
+end
+```
+
+
+
+## Inspecting routes
+
+Hanami provides a `hanami routes` command to inspect your application's routes. Run `bundle exec hanami routes` on the command line to view current routes:
 
 ```shell title="bundle exec hanami routes"
 GET     /                             home                          as :root
 GET     /books                        books.index
 GET     /books/:id                    books.show
+GET     /books/new                    books.new
 POST    /books                        books.create
+PATCH   /books/:id                    books.update
+DELETE  /books/:id                    books.destroy
 ```
 
 TODO: the rest of routing :)
+
+
+
+
+At the end, say - how does this action stuff wire up? Via the container. What is dat - let's see next...
